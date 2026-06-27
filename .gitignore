@@ -1,0 +1,19 @@
+# Build output
+cmake-build-*/
+build/
+out/
+
+external/
+
+# IDE
+.idea/
+.vs/
+*.user
+
+# Compiled objects / binaries
+*.obj
+*.o
+*.exe
+*.dll
+*.pdb
+*.ilk
