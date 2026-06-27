@@ -12,12 +12,37 @@
 // Composite / AutomaticTransition are at namespace scope; M::Transition and M::InternalTransition
 // are nested inside Machine so the EventType NTTP is strongly typed.
 
+#define S(name) struct name
+#define T(name) struct name
+
 struct log_ctx
 {
     std::vector<std::string> events;
 };
+
+enum class Events
+{
+    EVT_TO_B = 1,
+    EVT_PING = 2,
+    EVT_SELF = 3,
+    EVT_TO_C = 3,
+};
+
 using namespace hfsm;
-using M = Machine<log_ctx&>;
+using M = Machine<log_ctx&, Events>;
+
+using States = M::Root<Composite<S(RootState), S(AState), S(BState), S(CState)>, // RootState's default child is AState
+                                                                                 // (the First arg)
+                       S(DState)>;
+
+using Transitions =
+    M::Transitions<M::Transition<AState, BState, Events::EVT_TO_B, T(RejectingTransition)>, // A's guard always fails ->
+                                                                                            // falls through
+                   M::Transition<RootState, BState, Events::EVT_TO_B, T(ToB)>, // ancestor fallback, fires instead
+                   M::InternalTransition<AState, Events::EVT_PING, T(PingTransition)>,
+                   M::Transition<BState, BState, Events::EVT_SELF, T(SelfTransition)>, // self-transition
+                   M::Transition<AState, CState, Events::EVT_TO_C, T(ToC)>,
+                   M::AutomaticTransition<CState, DState, T(ToD)>>;
 
 struct RootState : M::state
 {
@@ -37,6 +62,18 @@ struct BState : M::state
     void on_exit(log_ctx& ctx) const override { ctx.events.push_back("exit:B"); }
 };
 
+struct CState : M::state
+{
+    void on_enter(log_ctx& ctx) const override { ctx.events.push_back("enter:C"); }
+    void on_exit(log_ctx& ctx) const override { ctx.events.push_back("exit:C"); }
+};
+
+struct DState : M::state
+{
+    void on_enter(log_ctx& ctx) const override { ctx.events.push_back("enter:D"); }
+    void on_exit(log_ctx& ctx) const override { ctx.events.push_back("exit:D"); }
+};
+
 struct RejectingTransition : M::transition
 {
     bool on_guard(log_ctx& ctx) const override { return false; }
@@ -47,6 +84,15 @@ struct ToB : M::transition
 {
     void on_action(log_ctx& ctx) const override { ctx.events.push_back("action:to-B"); }
 };
+struct ToC : M::transition
+{
+    void on_action(log_ctx& ctx) const override { ctx.events.push_back("action:to-C"); }
+};
+struct ToD : M::transition
+{
+    void on_action(log_ctx& ctx) const override { ctx.events.push_back("action:to-D"); }
+};
+
 
 struct SelfTransition : M::transition
 {
@@ -58,26 +104,15 @@ struct PingTransition : M::transition
     void on_action(log_ctx& ctx) const override { ctx.events.push_back("action:ping"); }
 };
 
-constexpr int EVT_TO_B = 1, EVT_PING = 2, EVT_SELF = 3;
-
-using States = M::Root<Composite<RootState, AState, BState> // RootState's default child is AState (the First arg)
-                       >;
-
-using Transitions =
-    M::Transitions<M::Transition<AState, BState, EVT_TO_B, RejectingTransition>, // A's guard always fails -> falls through
-                   M::Transition<RootState, BState, EVT_TO_B, ToB>, // ancestor fallback, fires instead
-                   M::InternalTransition<AState, EVT_PING, PingTransition>,
-                   M::Transition<BState, BState, EVT_SELF, SelfTransition> // self-transition
-                   >;
 
 using FSM = M::Tcontroller<States, Transitions>;
 
 // The core promise of the design: the generated tables match the hand-authored baseline
 // (ControllerTests.cpp) exactly, verified at compile time.
-static_assert(States::Size == 3);
+static_assert(States::Size == 5);
 static_assert(States::Depth == 2);
-static_assert(States::parentTable() == std::array<int, 3>{-1, 0, 0});
-static_assert(States::initialStateTable() == std::array<int, 3>{1, -1, -1});
+static_assert(States::parentTable() == std::array<int, 5>{-1, 0, 0, 0, -1});
+static_assert(States::initialStateTable() == std::array<int, 5>{1, -1, -1, -1, -1});
 
 class DeclarativeHfsmTest : public ::testing::Test
 {
@@ -97,7 +132,7 @@ TEST_F(DeclarativeHfsmTest, InternalTransitionRunsOnlyAction)
     machine.update();
     ctx.events.clear();
 
-    machine.on_event(EVT_PING);
+    machine.on_event(Events::EVT_PING);
     machine.update();
     EXPECT_EQ(ctx.events, (std::vector<std::string>{"action:ping"}));
 }
@@ -107,7 +142,7 @@ TEST_F(DeclarativeHfsmTest, RejectedGuardFallsThroughToAncestorRow)
     machine.update();
     ctx.events.clear();
 
-    machine.on_event(EVT_TO_B);
+    machine.on_event(Events::EVT_TO_B);
     machine.update();
     EXPECT_EQ(ctx.events, (std::vector<std::string>{"exit:A", "action:to-B", "enter:B"}));
 }
@@ -115,11 +150,11 @@ TEST_F(DeclarativeHfsmTest, RejectedGuardFallsThroughToAncestorRow)
 TEST_F(DeclarativeHfsmTest, SelfTransitionForcesFullExitReEnter)
 {
     machine.update();
-    machine.on_event(EVT_TO_B); // move to B first
+    machine.on_event(Events::EVT_TO_B); // move to B first
     machine.update();
     ctx.events.clear();
 
-    machine.on_event(EVT_SELF);
+    machine.on_event(Events::EVT_SELF);
     machine.update();
     EXPECT_EQ(ctx.events, (std::vector<std::string>{"exit:B", "action:self", "enter:B"}));
 }
@@ -127,11 +162,23 @@ TEST_F(DeclarativeHfsmTest, SelfTransitionForcesFullExitReEnter)
 TEST_F(DeclarativeHfsmTest, NoMatchingRowIsANoOp)
 {
     machine.update();
-    machine.on_event(EVT_TO_B); // move to B
+    machine.on_event(Events::EVT_TO_B); // move to B
     machine.update();
     ctx.events.clear();
 
-    machine.on_event(EVT_PING); // B has no PING row, neither does Root
+    machine.on_event(Events::EVT_PING); // B has no PING row, neither does Root
     machine.update();
     EXPECT_TRUE(ctx.events.empty());
+}
+
+TEST_F(DeclarativeHfsmTest, AutomaticTransition)
+{
+    machine.update();
+    ctx.events.clear();
+    machine.on_event(Events::EVT_TO_C);
+    machine.update();
+    machine.update();
+    EXPECT_EQ(ctx.events,
+              (std::vector<std::string>{"exit:A", "action:to-C", "enter:C", "exit:C", "exit:Root", "action:to-D",
+                                        "enter:D"}));
 }

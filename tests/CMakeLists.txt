@@ -1,0 +1,11 @@
+function(add_hfsm_test name)
+    add_executable(${name} ${name}.cpp)
+    target_link_libraries(${name} PRIVATE hfsm GTest::gtest_main)
+    set_target_properties(${name} PROPERTIES CXX_STANDARD 20)
+    gtest_discover_tests(${name})
+endfunction()
+
+add_hfsm_test(HierarchyTests)
+add_hfsm_test(ControllerTests)
+add_hfsm_test(DeclarativeHfsmTests)
+add_hfsm_test(RadioControllerTests)
