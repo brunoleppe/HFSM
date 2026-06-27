@@ -10,7 +10,15 @@ using namespace std;
 
 using namespace hfsm;
 
-using M = Machine<int&>;
+enum class Events
+{
+    Event1,
+    Event2,
+    Event3,
+    Event4,
+};
+
+using M = Machine<int&, Events>;
 
 S(s1);
 S(s2);
@@ -20,8 +28,11 @@ S(s5);
 S(s6);
 
 using states = M::Root<S(s1), Composite<S(s2), Composite<S(s3), S(s4), S(s5)>, S(s6)>>;
-using Transitions = M::Transitions<Transition<s1, s2, 0, T(t1)>, Transition<s4, s5, 1, T(t2)>,
-                                   Transition<s5, s6, 2, T(t3)>, Transition<s6, s1, 3, T(t4)>>;
+using Transitions = M::Transitions<
+    M::Transition<s1, s2, Events::Event1, T(t1)>,
+    M::Transition<s4, s5, Events::Event2, T(t2)>,
+    M::Transition<s5, s6, Events::Event3, T(t3)>,
+    M::Transition<s6, s1, Events::Event4, T(t4)>>;
 
 struct s1 : M::state
 {
@@ -93,13 +104,13 @@ int main()
     while (count < 4)
     {
         if (count == 0)
-            c.on_event(0);
+            c.on_event(Events::Event1);
         if (count == 1)
-            c.on_event(1);
+            c.on_event(Events::Event2);
         if (count == 2)
-            c.on_event(2);
+            c.on_event(Events::Event3);
         if (count == 3)
-            c.on_event(3);
+            c.on_event(Events::Event4);
         c.update();
         count++;
     }

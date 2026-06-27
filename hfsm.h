@@ -2,7 +2,7 @@
 #define HFSM_H
 
 #if __cplusplus < 201703L
-#  error "hfsm requires C++17 or later"
+#error "hfsm requires C++17 or later"
 #endif
 
 #include <array>
@@ -24,29 +24,36 @@ namespace hfsm
         constexpr span(T* ptr, std::size_t size) noexcept : ptr_(ptr), size_(size) {}
 
         template <std::size_t N>
-        constexpr span(T (&arr)[N]) noexcept : ptr_(arr), size_(N) {}
+        constexpr span(T (&arr)[N]) noexcept : ptr_(arr), size_(N)
+        {
+        }
 
         template <std::size_t N>
-        constexpr span(std::array<T, N>& arr) noexcept : ptr_(arr.data()), size_(N) {}
+        constexpr span(std::array<T, N>& arr) noexcept : ptr_(arr.data()), size_(N)
+        {
+        }
 
         // For span<const T const*> from const array<const T const*, N> (T already top-level const)
         template <std::size_t N>
-        constexpr span(const std::array<T, N>& arr) noexcept : ptr_(arr.data()), size_(N) {}
+        constexpr span(const std::array<T, N>& arr) noexcept : ptr_(arr.data()), size_(N)
+        {
+        }
 
         // For span<const T> from const array<T, N> (e.g. span<const int> from array<int>)
-        template <typename U, std::size_t N,
-                  std::enable_if_t<std::is_same_v<std::remove_const_t<T>, U>, int> = 0>
-        constexpr span(const std::array<U, N>& arr) noexcept : ptr_(arr.data()), size_(N) {}
+        template <typename U, std::size_t N, std::enable_if_t<std::is_same_v<std::remove_const_t<T>, U>, int> = 0>
+        constexpr span(const std::array<U, N>& arr) noexcept : ptr_(arr.data()), size_(N)
+        {
+        }
 
-        constexpr T*          data()              const noexcept { return ptr_; }
-        constexpr std::size_t size()              const noexcept { return size_; }
-        constexpr bool        empty()             const noexcept { return size_ == 0; }
-        constexpr T&          operator[](std::size_t i) const noexcept { return ptr_[i]; }
-        constexpr T*          begin()             const noexcept { return ptr_; }
-        constexpr T*          end()               const noexcept { return ptr_ + size_; }
+        constexpr T* data() const noexcept { return ptr_; }
+        constexpr std::size_t size() const noexcept { return size_; }
+        constexpr bool empty() const noexcept { return size_ == 0; }
+        constexpr T& operator[](std::size_t i) const noexcept { return ptr_[i]; }
+        constexpr T* begin() const noexcept { return ptr_; }
+        constexpr T* end() const noexcept { return ptr_ + size_; }
 
     private:
-        T*          ptr_;
+        T* ptr_;
         std::size_t size_;
     };
 #else
@@ -59,8 +66,6 @@ namespace hfsm
         shallow,
         deep
     };
-
-    static constexpr int NO_EVENT = -1;
 
     struct hierarchy
     {
@@ -245,7 +250,7 @@ namespace hfsm
         }
     };
 
-    template <typename Context>
+    template <typename Context, typename EventType = int>
     struct controller
     {
         struct state
@@ -284,44 +289,44 @@ namespace hfsm
 
         struct row : auto_row
         {
-            int eventId = 0;
+            EventType eventId{};
             unsigned internal : 1;
 
             constexpr row() : internal(0) {}
 
-            constexpr row(int from, int to, int eventId, bool internal, transition_kind kind, const transition* t) :
-                auto_row(from, to, kind, t), eventId(eventId), internal(internal)
+            constexpr row(int from, int to, EventType eventId, bool internal, transition_kind kind,
+                          const transition* t) : auto_row(from, to, kind, t), eventId(eventId), internal(internal)
             {
             }
 
-            static constexpr row make_normal(int from, int to, int eventId, const transition* t,
+            static constexpr row make_normal(int from, int to, EventType eventId, const transition* t,
                                              transition_kind kind = transition_kind::normal)
             {
                 return row(from, to, eventId, false, kind, t);
             }
 
-            static constexpr row make_internal(int from, int eventId, const transition* t,
+            static constexpr row make_internal(int from, EventType eventId, const transition* t,
                                                transition_kind kind = transition_kind::normal)
             {
                 return row(from, from, eventId, true, kind, t);
             }
         };
 
-        controller(Context ctx, span<const int> parentTable, span<const int> initialStateTable,
-                   span<int> historyTable, span<int> path, span<const state* const> stateTable,
-                   span<const row> transitionTable, span<const auto_row> autoTransitionTable) :
+        controller(Context ctx, span<const int> parentTable, span<const int> initialStateTable, span<int> historyTable,
+                   span<int> path, span<const state* const> stateTable, span<const row> transitionTable,
+                   span<const auto_row> autoTransitionTable) :
             h(parentTable, initialStateTable, historyTable, path), ctx(ctx), stateTable(stateTable),
             transitionTable(transitionTable), autoTransitionTable(autoTransitionTable)
         {
         }
 
         // Returns false if the pending slot is occupied; caller retains the event and retries.
-        bool on_event(int eventId)
+        bool on_event(EventType eventId)
         {
-            assert(eventId != NO_EVENT);
-            if (pendingEvent != NO_EVENT)
+            if (hasPendingEvent)
                 return false;
             pendingEvent = eventId;
+            hasPendingEvent = true;
             return true;
         }
 
@@ -339,10 +344,10 @@ namespace hfsm
             }
             process_automatic();
             stateTable[h.currentState]->on_update(ctx);
-            if (pendingEvent != NO_EVENT)
+            if (hasPendingEvent)
             {
-                int ev = pendingEvent;
-                pendingEvent = NO_EVENT;
+                EventType ev = pendingEvent;
+                hasPendingEvent = false;
                 dispatch_event(ev);
             }
         }
@@ -391,7 +396,7 @@ namespace hfsm
             }
         }
 
-        void dispatch_event(int eventId)
+        void dispatch_event(EventType eventId)
         {
             int s = h.currentState;
             while (s != hierarchy::TOP_MOST_PARENT)
@@ -438,28 +443,13 @@ namespace hfsm
         const span<const row> transitionTable;
         const span<const auto_row> autoTransitionTable;
 
-        int pendingEvent = NO_EVENT;
+        EventType pendingEvent{};
+        bool hasPendingEvent = false;
         bool initialized = false;
     };
 
     template <typename Self, typename First, typename... Rest>
     struct Composite
-    {
-    };
-
-    template <typename From, typename To, int EventId, typename TransitionType,
-              transition_kind Kind = transition_kind::normal>
-    struct Transition
-    {
-    };
-
-    template <typename From, int EventId, typename TransitionType>
-    struct InternalTransition
-    {
-    };
-
-    template <typename From, typename To, typename TransitionType, transition_kind Kind = transition_kind::normal>
-    struct AutomaticTransition
     {
     };
 
@@ -706,13 +696,29 @@ namespace hfsm
         };
     } // namespace utils
 
-    template <typename Context>
+    template <typename Context, typename EventType = int>
     struct Machine
     {
-        using state = typename controller<Context>::state;
-        using transition = typename controller<Context>::transition;
-        using row = typename controller<Context>::row;
-        using auto_row = typename controller<Context>::auto_row;
+        using state = typename controller<Context, EventType>::state;
+        using transition = typename controller<Context, EventType>::transition;
+        using row = typename controller<Context, EventType>::row;
+        using auto_row = typename controller<Context, EventType>::auto_row;
+
+        template <typename From, typename To, EventType EventId, typename TransitionType,
+                  transition_kind Kind = transition_kind::normal>
+        struct Transition
+        {
+        };
+
+        template <typename From, EventType EventId, typename TransitionType>
+        struct InternalTransition
+        {
+        };
+
+        template <typename From, typename To, typename TransitionType, transition_kind Kind = transition_kind::normal>
+        struct AutomaticTransition
+        {
+        };
 
         template <typename... States>
         struct Root : utils::Root<States...>
@@ -787,23 +793,23 @@ namespace hfsm
             }
 
         private:
-            template <typename Tags, typename From, typename To, int EventId, typename TransitionType,
+            template <typename Tags, typename From, typename To, EventType EventId, typename TransitionType,
                       transition_kind Kind>
             static constexpr row make_row(Transition<From, To, EventId, TransitionType, Kind>)
             {
                 static_assert(std::is_base_of_v<transition, TransitionType>,
-                              "transition type must derive from Machine<Context>::transition");
+                              "transition type must derive from Machine<Context, EventType>::transition");
                 static_assert(std::is_default_constructible_v<TransitionType>,
                               "transition type must be default-constructible");
                 return row::make_normal(utils::resolve_index_v<From, Tags>, utils::resolve_index_v<To, Tags>, EventId,
                                         &utils::instancer<TransitionType>::value, Kind);
             }
 
-            template <typename Tags, typename From, int EventId, typename TransitionType>
+            template <typename Tags, typename From, EventType EventId, typename TransitionType>
             static constexpr row make_row(InternalTransition<From, EventId, TransitionType>)
             {
                 static_assert(std::is_base_of_v<transition, TransitionType>,
-                              "transition type must derive from Machine<Context>::transition");
+                              "transition type must derive from Machine<Context, EventType>::transition");
                 static_assert(std::is_default_constructible_v<TransitionType>,
                               "transition type must be default-constructible");
                 return row::make_internal(utils::resolve_index_v<From, Tags>, EventId,
@@ -823,7 +829,7 @@ namespace hfsm
         };
 
         template <typename StateTable, typename TransitionTable>
-        struct Tcontroller : controller<Context>
+        struct Tcontroller : controller<Context, EventType>
         {
         private:
             // these must be static constexpr, not locals: the controller stores non-owning spans
@@ -837,7 +843,8 @@ namespace hfsm
             static constexpr auto make_history_table() noexcept
             {
                 std::array<int, StateTable::Size> arr{};
-                for (auto& v : arr) v = hierarchy::INVALID;
+                for (auto& v : arr)
+                    v = hierarchy::INVALID;
                 return arr;
             }
 
@@ -846,8 +853,8 @@ namespace hfsm
 
         public:
             explicit Tcontroller(Context ctx) :
-                controller<Context>(ctx, parentTable, initialStateTable, historyTable, path, stateTable, eventRows,
-                                    autoRows)
+                controller<Context, EventType>(ctx, parentTable, initialStateTable, historyTable, path, stateTable,
+                                               eventRows, autoRows)
             {
             }
 

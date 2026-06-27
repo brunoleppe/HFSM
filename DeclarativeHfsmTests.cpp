@@ -9,7 +9,8 @@
 // to diff the generated parentTable/initialStateTable/states[]/rows[] against the known-good
 // hand-authored baseline, end-to-end through controller::on_event.
 //
-// Composite / Transition / InternalTransition are the public API, usable bare - no `using`.
+// Composite / AutomaticTransition are at namespace scope; M::Transition and M::InternalTransition
+// are nested inside Machine so the EventType NTTP is strongly typed.
 
 struct log_ctx
 {
@@ -63,10 +64,10 @@ using States = M::Root<Composite<RootState, AState, BState> // RootState's defau
                        >;
 
 using Transitions =
-    M::Transitions<Transition<AState, BState, EVT_TO_B, RejectingTransition>, // A's guard always fails -> falls through
-                   Transition<RootState, BState, EVT_TO_B, ToB>, // ancestor fallback, fires instead
-                   InternalTransition<AState, EVT_PING, PingTransition>,
-                   Transition<BState, BState, EVT_SELF, SelfTransition> // self-transition
+    M::Transitions<M::Transition<AState, BState, EVT_TO_B, RejectingTransition>, // A's guard always fails -> falls through
+                   M::Transition<RootState, BState, EVT_TO_B, ToB>, // ancestor fallback, fires instead
+                   M::InternalTransition<AState, EVT_PING, PingTransition>,
+                   M::Transition<BState, BState, EVT_SELF, SelfTransition> // self-transition
                    >;
 
 using FSM = M::Tcontroller<States, Transitions>;
