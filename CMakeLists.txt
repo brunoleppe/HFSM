@@ -1,14 +1,11 @@
-cmake_minimum_required(VERSION 4.2)
+cmake_minimum_required(VERSION 3.28)
 project(HFSM)
 
 # Header-only library target — consumers get the include path automatically
 add_library(hfsm INTERFACE)
 target_include_directories(hfsm INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
-# Playground / scratch executable
-add_executable(hfsm_dev main.cpp)
-target_link_libraries(hfsm_dev PRIVATE hfsm)
-set_target_properties(hfsm_dev PROPERTIES CXX_STANDARD 20)
+add_subdirectory(examples)
 
 # Tests — C++20 required (StrLiteral NTTPs, constexpr comparisons, etc.)
 include(FetchContent)

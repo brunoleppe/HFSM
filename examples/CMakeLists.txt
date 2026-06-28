@@ -1,0 +1,5 @@
+foreach(name toggle traffic_light device_power)
+    add_executable(example_${name} ${name}.cpp)
+    target_link_libraries(example_${name} PRIVATE hfsm)
+    set_target_properties(example_${name} PROPERTIES CXX_STANDARD 17)
+endforeach()

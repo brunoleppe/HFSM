@@ -185,7 +185,7 @@ namespace hfsm
         {
             assert(valid_state(a));
             int s = historyTable[a];
-            if (s == INVALID)
+            if (s == INVALID) // subtree was never entered; fall back to static initial-state chain
                 return initial_path_compute(a);
             int n = 0;
             while (s != INVALID)
