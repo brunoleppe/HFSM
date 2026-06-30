@@ -38,6 +38,7 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <type_traits>
 #if __cplusplus >= 202002L
@@ -51,6 +52,7 @@ namespace hfsm
     struct span
     {
         constexpr span() noexcept : ptr_(nullptr), size_(0) {}
+
         constexpr span(T* ptr, std::size_t size) noexcept : ptr_(ptr), size_(size) {}
 
         template <std::size_t N>
@@ -387,7 +389,56 @@ namespace hfsm
         int get_current_state() const { return h.currentState; }
         bool is_active(const int state) const { return h.is_active(state); }
 
+        // --- Serialization: the engine provides the data, you persist it however you want.
+        // save() hands your sink the active state + history; restore()/restore_cascade()
+        // rebuild from values you read back (range-checked; machine untouched if invalid).
+        template <typename Sink>
+        void save(Sink&& sink) const
+        {
+            sink(h.currentState,  static_cast<const int*>(h.historyTable.data()), h.historyTable.size());
+        }
+
+        bool restore(int currentState, const int* history, std::size_t count)
+        {
+            return restore_impl(currentState, history, count, false);
+        }
+
+        bool restore_cascade(int currentState, const int* history, std::size_t count)
+        {
+            return restore_impl(currentState, history, count, true);
+        }
+
     private:
+        void replay_enter_path()
+        {
+            const int n = h.entry_path_compute(h.currentState, hierarchy::TOP_MOST_PARENT);
+            for (int i = 0; i < n; ++i)
+                stateTable[h.path[i]]->on_enter(ctx);
+        }
+
+        bool restore_impl(int currentState, const int* history, std::size_t count, bool cascade)
+        {
+            const std::size_t n = h.historyTable.size();
+            if (history == nullptr || count != n)
+                return false;
+            if (currentState < 0 || currentState >= static_cast<int>(n))
+                return false;
+            for (std::size_t i = 0; i < n; ++i)
+                if (history[i] < hierarchy::INVALID || history[i] >= static_cast<int>(n))
+                    return false;
+
+            for (std::size_t i = 0; i < n; ++i)
+                h.historyTable[i] = history[i];
+            h.currentState = currentState;
+            initialized = true;
+            // resume as an initialized machine; no initial entry cascade
+            hasPendingEvent = false;
+            // drop any stale queued event
+            if (cascade)
+                replay_enter_path();
+            return true;
+        }
+
         void enter_path(int n)
         {
             for (int i = 0; i < n; i++)
