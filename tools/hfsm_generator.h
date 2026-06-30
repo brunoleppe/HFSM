@@ -35,11 +35,11 @@
 //
 // It is driven entirely by the compile-time metadata that the machine already
 // carries: the state hierarchy from a StateTable (Machine::Root) and the
-// transition list from a TransitionTable (Machine::Transitions). State and
-// transition-type names come from nameof; event-enum names from magic_enum.
-
+// transition list from a TransitionTable (Machine::Transitions). State names come
+// from hfsm_annotations (nameof); event-enum names from magic_enum.
 
 #include "hfsm.h"
+#include "hfsm_annotations.h"
 
 #include <array>
 #include <functional>
@@ -50,18 +50,11 @@
 #include <vector>
 
 #include "third_party/magic_enum/magic_enum.hpp"
-#include "third_party/nameof/nameof.hpp"
 
 namespace hfsm::diagram
 {
     namespace detail
     {
-        template <typename... Tags>
-        std::array<std::string_view, sizeof...(Tags)> state_names(utils::list<Tags...>)
-        {
-            return {std::string_view{nameof::nameof_type<Tags>()}...};
-        }
-
         template <typename Meta>
         std::string event_name()
         {
@@ -198,7 +191,7 @@ namespace hfsm::diagram
     std::string to_plantuml(std::string_view title = {})
     {
         constexpr int size = StateTable::Size;
-        const auto names = detail::state_names(typename StateTable::Tags{});
+        const auto names = ::hfsm::annotations::get_names<StateTable>();
         constexpr auto parent = StateTable::parentTable();
         constexpr auto initial = StateTable::initialStateTable();
 

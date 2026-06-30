@@ -50,9 +50,39 @@
 // Unannotated transitions are unaffected; the generator falls back to its
 // generic [Guard]/Action markers for them.
 
+#include "hfsm.h"
+
+#include <array>
 #include <string_view>
+
+#include "third_party/nameof/nameof.hpp"
 
 #define HFSM_ACTION(name) static constexpr std::string_view action_label = name;
 #define HFSM_GUARD(name) static constexpr std::string_view guard_label = name;
+
+namespace hfsm::annotations
+{
+    namespace detail
+    {
+        template <typename... Tags>
+        constexpr std::array<const char*, sizeof...(Tags)> names_of(utils::list<Tags...>)
+        {
+            return {nameof::nameof_type<Tags>().data()...};
+        }
+    } // namespace detail
+
+    // Array of state names (the state type names, via nameof), indexed by the same state
+    // index the controller passes to on_init / on_transition. Each entry is a NUL-terminated
+    // string with static lifetime, so it can be used directly in those plain callbacks:
+    //
+    //   static constexpr auto names = hfsm::annotations::get_names<States>();
+    //   void log(int from, int to) { std::printf("%s -> %s\n", names[from], names[to]); }
+    //   machine.set_on_transition(&log);
+    template <typename StateTable>
+    constexpr std::array<const char*, StateTable::Size> get_names()
+    {
+        return detail::names_of(typename StateTable::Tags{});
+    }
+} // namespace hfsm::annotations
 
 #endif // HFSM_ANNOTATIONS_H
