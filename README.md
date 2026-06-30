@@ -171,8 +171,19 @@ update()
 
 The first `update()` performs the initial entry cascade. There is no separate `initialize()`.
 
-`on_event(id)` queues exactly one event. If a previous event hasn't been consumed yet, it returns
-`false` — the caller decides whether to retry next tick or drop.
+**One event per tick.** The engine holds a single pending-event slot. `on_event(id)` fills it and
+returns `true`; if the slot is already occupied it returns `false` and the event is not stored —
+the engine never silently drops or reorders events on your behalf. At most one event-driven
+transition fires per `update()` call.
+
+Event queuing is the caller's responsibility. If your system can produce events faster than one
+per tick, maintain your own queue and drain it in coordination with `update()`:
+
+```cpp
+while (!my_queue.empty() && machine.on_event(my_queue.front()))
+    my_queue.pop();
+machine.update();   // consumes at most one event from the slot
+```
 
 ### History
 
@@ -405,10 +416,17 @@ static_assert(States::parentTable() == std::array<int, 16>{-1, 0, 0, 2, 2, 4, 4,
 
 ### Tick vs. reactive dispatch
 
-This engine doesn't implement reactive - synchronous event dispatching — `on_event()` queues one slot and `update()` drains it. The separation gives a
-fixed, predictable execution order per clock tick, suits embedded targets with RTOS-tick or game-loop
-architectures, and eliminates re-entrant dispatch entirely. There is no `dispatching` guard; the
-engine is not called from inside a callback.
+The engine holds a single pending-event slot: `on_event()` fills it, `update()` drains it — one
+event dispatched per tick, no internal queue. This is a deliberate scope boundary: queuing policy
+(bounded ring buffer, priority queue, drop-oldest, etc.) varies too much between applications to
+bake into the engine, and adding it would require allocation or a size parameter. Keeping the slot
+at depth-1 means the engine itself never allocates, and the caller retains full control over
+backpressure. The `false` return from `on_event()` is the backpressure signal; what the caller
+does with it — retry next tick, push to an external queue, or drop — is application logic.
+
+The tick model also eliminates re-entrant dispatch entirely. Execution order per `update()` is
+fixed: auto-transitions → `on_update` → pending event. There is no `dispatching` guard; the
+engine is never called from inside a callback.
 
 ### Context by reference
 
@@ -465,7 +483,7 @@ no C++17 equivalent.
 | `M::AutomaticTransition<From, To, T, [Kind]>` | Guard-driven automatic transition; no event ID |
 | `hfsm::transition_kind` | `normal` / `shallow` / `deep` |
 | `Tcontroller::update()` | One execution tick |
-| `Tcontroller::on_event(EventType)` | Queue next event; returns `false` if slot busy |
+| `Tcontroller::on_event(EventType)` | Fill the single pending-event slot; returns `false` (event not stored) if already occupied — at most one event dispatched per `update()` |
 | `Tcontroller::is_active_s<T>()` | `true` if state type `T` is currently active (includes ancestors) |
 | `Tcontroller::is_current_s<T>()` | `true` if `T` is the active leaf state |
 | `Tcontroller::get_current_state()` | Returns the active leaf state's integer ID |
