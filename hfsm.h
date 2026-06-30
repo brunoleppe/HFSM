@@ -708,16 +708,48 @@ namespace hfsm
                   transition_kind Kind = transition_kind::normal>
         struct Transition
         {
+            struct Meta
+            {
+                using FromState = From;
+                using ToState = To;
+                using transition_type = TransitionType;
+                static constexpr transition_kind kind = Kind;
+                static constexpr EventType eventId = EventId;
+                static constexpr bool internal = false;
+                static constexpr bool automatic = false;
+                static constexpr bool has_event = true;
+            };
         };
 
         template <typename From, EventType EventId, typename TransitionType>
         struct InternalTransition
         {
+            struct Meta
+            {
+                using FromState = From;
+                using ToState = From;
+                using transition_type = TransitionType;
+                static constexpr transition_kind kind = transition_kind::normal;
+                static constexpr EventType eventId = EventId;
+                static constexpr bool internal = true;
+                static constexpr bool automatic = false;
+                static constexpr bool has_event = true;
+            };
         };
 
         template <typename From, typename To, typename TransitionType, transition_kind Kind = transition_kind::normal>
         struct AutomaticTransition
         {
+            struct Meta
+            {
+                using FromState = From;
+                using ToState = To;
+                using transition_type = TransitionType;
+                static constexpr transition_kind kind = Kind;
+                static constexpr bool internal = false;
+                static constexpr bool automatic = true;
+                static constexpr bool has_event = false;
+            };
         };
 
         template <typename... States>
@@ -747,6 +779,9 @@ namespace hfsm
         template <typename... Entries>
         struct Transitions
         {
+            // Compile-time list of every transition's Meta, for tooling (e.g. diagram export).
+            using metas = utils::list<typename Entries::Meta...>;
+
         private:
             template <typename T>
             struct is_auto : std::false_type

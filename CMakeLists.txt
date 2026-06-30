@@ -2,7 +2,9 @@ cmake_minimum_required(VERSION 3.28)
 project(HFSM)
 
 # Header-only library target — consumers get the include path automatically
-add_library(hfsm INTERFACE)
+add_library(hfsm INTERFACE
+        third_party/magic_enum/magic_enum.hpp
+        third_party/nameof/nameof.hpp)
 target_include_directories(hfsm INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_subdirectory(examples)
