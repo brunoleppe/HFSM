@@ -132,7 +132,9 @@ namespace hfsm::diagram
         {
             int from = hierarchy::INVALID;
             int to = hierarchy::INVALID;
-            std::string label;
+            std::string event;
+            std::string guard;
+            std::string action;
             transition_kind kind = transition_kind::normal;
             bool internal = false;
             bool automatic = false;
@@ -148,19 +150,27 @@ namespace hfsm::diagram
             e.internal = Meta::internal;
             e.automatic = Meta::automatic;
 
-            // UML label: event [guard] / action — each segment only when present.
             using TT = typename Meta::transition_type;
-            std::string label = event_name<Meta>();
+            e.event = event_name<Meta>();
             if (has_guard<TT>())
+                e.guard = guard_text<TT>();
+            if (has_action<TT>())
+                e.action = action_text<TT>();
+            return e;
+        }
+
+        inline std::string uml_label(const edge& e)
+        {
+            std::string label = e.event;
+            if (!e.guard.empty())
             {
                 if (!label.empty())
                     label += " ";
-                label += "[" + guard_text<TT>() + "]";
+                label += "[" + e.guard + "]";
             }
-            if (has_action<TT>())
-                label += "/" + action_text<TT>();
-            e.label = label;
-            return e;
+            if (!e.action.empty())
+                label += "/" + e.action;
+            return label;
         }
 
         template <typename StateTable, typename... Metas>
@@ -239,20 +249,112 @@ namespace hfsm::diagram
         const auto edges = detail::collect_edges<StateTable>(typename TransitionTable::metas{});
         for (const auto& e : edges)
         {
+            const std::string label = detail::uml_label(e);
             if (e.internal)
             {
-                out << names[e.from] << " --> " << names[e.from] << ": " << e.label << "   (internal)\n";
+                out << names[e.from] << " --> " << names[e.from] << ": " << label << "   (internal)\n";
             }
             else
             {
                 out << names[e.from] << " --> " << names[e.to] << detail::history_suffix(e.kind);
-                if (!e.label.empty())
-                    out << " : " << e.label;
+                if (!label.empty())
+                    out << " : " << label;
                 out << "\n";
             }
         }
 
         out << "@enduml\n";
+        return out.str();
+    }
+
+    // Emits a YAML description of the machine — an intermediate format intended for
+    // consumption by external tools (e.g. a Python script that renders PlantUML or SCXML).
+    //
+    // Schema:
+    //   name: <title>           # optional
+    //   states:
+    //     - name: Root
+    //       initial: A          # only for composite states
+    //       states:           # only for composite states
+    //         - name: A
+    //         - name: B
+    //   transitions:
+    //     - from: A
+    //       to: B
+    //       event: EVT_GO       # omitted for automatic transitions
+    //       automatic: true     # omitted for event-driven transitions
+    //       internal: true      # omitted when false
+    //       kind: shallow       # omitted for normal; "shallow" or "deep" for history
+    //       guard: IsReady      # omitted when no guard override
+    //       action: StartMotor  # omitted when no action override
+    template <typename StateTable, typename TransitionTable>
+    std::string to_yaml(std::string_view name = {})
+    {
+        constexpr int size = StateTable::Size;
+        const auto names = ::hfsm::annotations::get_names<StateTable>();
+        constexpr auto parent  = StateTable::parentTable();
+        constexpr auto initial = StateTable::initialStateTable();
+
+        std::vector<std::vector<int>> children(size);
+        std::vector<int> roots;
+        for (int i = 0; i < size; ++i)
+        {
+            if (parent[i] == hierarchy::TOP_MOST_PARENT)
+                roots.push_back(i);
+            else
+                children[parent[i]].push_back(i);
+        }
+
+        std::ostringstream out;
+
+        if (!name.empty())
+            out << "name: " << name << "\n";
+
+        out << "states:\n";
+
+        std::function<void(int, std::string_view)> emit_state = [&](int i, std::string_view indent)
+        {
+            out << indent << "- name: " << names[i] << "\n";
+            const std::string inner{indent};
+            if (initial[i] != hierarchy::INVALID)
+                out << inner << "  initial: " << names[initial[i]] << "\n";
+            if (!children[i].empty())
+            {
+                out << inner << "  states:\n";
+                const std::string child_indent = inner + "    ";
+                for (int c : children[i])
+                    emit_state(c, child_indent);
+            }
+        };
+
+        for (int r : roots)
+            emit_state(r, "  ");
+
+        const auto edges = detail::collect_edges<StateTable>(typename TransitionTable::metas{});
+        if (!edges.empty())
+        {
+            out << "transitions:\n";
+            for (const auto& e : edges)
+            {
+                out << "  - from: " << names[e.from] << "\n";
+                out << "    to: "   << names[e.to]   << "\n";
+                if (e.automatic)
+                    out << "    automatic: true\n";
+                else if (!e.event.empty())
+                    out << "    event: " << e.event << "\n";
+                if (e.internal)
+                    out << "    internal: true\n";
+                if (e.kind == transition_kind::shallow)
+                    out << "    kind: shallow\n";
+                else if (e.kind == transition_kind::deep)
+                    out << "    kind: deep\n";
+                if (!e.guard.empty())
+                    out << "    guard: "  << e.guard  << "\n";
+                if (!e.action.empty())
+                    out << "    action: " << e.action << "\n";
+            }
+        }
+
         return out.str();
     }
 } // namespace hfsm::diagram
