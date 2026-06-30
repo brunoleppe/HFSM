@@ -17,7 +17,8 @@ order must be deterministic per clock tick.
 - **Context by reference**: every callback receives `Context&`. States and transitions hold
   no data of their own.
 - **Compile-time verification**: hierarchy correctness checked with `static_assert`; a typo'd
-  state tag is a hard compile error.
+  state tag is a hard compile error. Optional `hfsm::structure::validate<FSM>()` adds deeper
+  checks (duplicate triggers, automatic self-loops) at the call site.
 
 ---
 
@@ -218,6 +219,30 @@ Frames are native-endian — intended for a device persisting and restoring its 
 Optional, dev-time headers under `tools/`. They depend on the vendored `nameof` and
 `magic_enum` (`third_party/`); the core `hfsm.h` does not.
 
+### Structure validation — `tools/hfsm_structure.h`
+
+`hfsm::structure::validate<FSM>()` performs additional compile-time checks on a fully wired
+`Tcontroller`. It is opt-in and intended to be called alongside the machine definition or in a
+dedicated test translation unit.
+
+```cpp
+#include "tools/hfsm_structure.h"
+
+using FSM = M::Tcontroller<States, Transitions>;
+hfsm::structure::validate<FSM>();   // compile error if anything below fires
+```
+
+Checks performed:
+
+| Check | Error message |
+|---|---|
+| Two event rows share the same `(from, eventId)` — second is silently unreachable | `"duplicate (from, eventId) pair in transition table: second transition is unreachable"` |
+| An `AutomaticTransition` has `From == To` — guaranteed infinite loop | `"automatic transition self-loop detected: from == to causes an infinite loop"` |
+
+The function has no runtime cost: it instantiates an internal `validator` type (inheriting from
+`FSM` to access its `protected` tables) and discards it with `sizeof`. Nothing executes at run
+time.
+
 ### State-name table — `tools/hfsm_annotations.h`
 
 `hfsm::annotations::get_names<States>()` returns a `constexpr std::array<const char*, States::Size>`
@@ -280,6 +305,56 @@ label when annotated, otherwise the generic `Guard` / `Action`.
 
 History kinds render the target as a PlantUML history pseudostate: `To[H]` (shallow), `To[H*]` (deep).
 See `examples/traffic_light_annotated.cpp` for a complete annotated machine.
+
+### YAML export — `tools/hfsm_generator.h`
+
+`hfsm::diagram::to_yaml<States, Transitions>(name = {})` emits a machine-readable YAML
+description of the same machine. It is intended as an intermediate format for external tools
+(e.g. a Python script) that render PlantUML, SCXML, or any other diagram format without
+requiring a C++ toolchain.
+
+```cpp
+#include "tools/hfsm_generator.h"
+std::cout << hfsm::diagram::to_yaml<States, Transitions>("TrafficLight");
+```
+
+Example output:
+
+```yaml
+name: TrafficLight
+states:
+  - name: RootState
+    initial: Red
+    states:
+      - name: Red
+      - name: Yellow
+      - name: Green
+transitions:
+  - from: Red
+    to: Green
+    event: GO
+    guard: IsReady
+    action: StartGreen
+  - from: Green
+    to: Yellow
+    automatic: true
+    guard: TimerExpired
+  - from: Yellow
+    to: Red
+    event: TICK
+    kind: shallow
+```
+
+Schema rules:
+- `initial` and `states` are emitted only for composite states.
+- `event` is omitted for automatic transitions; `automatic: true` is emitted instead.
+- `internal: true` is emitted only when the transition is internal.
+- `kind` is omitted for `normal`; `"shallow"` or `"deep"` otherwise.
+- `guard` and `action` are omitted when the transition type does not override the
+  corresponding virtual method.
+
+The two export functions (`to_plantuml`, `to_yaml`) share the same edge-collection pass;
+both reflect `HFSM_ACTION` / `HFSM_GUARD` labels when present.
 
 ---
 
@@ -403,6 +478,8 @@ no C++17 equivalent.
 | `hfsm::annotations::get_names<States>()` | `constexpr std::array<const char*, Size>` of state type names, indexed by state ID (`tools/hfsm_annotations.h`) |
 | `HFSM_ACTION(name)` / `HFSM_GUARD(name)` | Annotate a transition's action/guard with a diagram label (`tools/hfsm_annotations.h`) |
 | `hfsm::diagram::to_plantuml<States, Transitions>([title])` | Generate a PlantUML state-diagram string (`tools/hfsm_generator.h`) |
+| `hfsm::diagram::to_yaml<States, Transitions>([name])` | Generate a YAML machine description for external diagram tools (`tools/hfsm_generator.h`) |
+| `hfsm::structure::validate<FSM>()` | Compile-time structural checks: duplicate triggers, auto self-loops (`tools/hfsm_structure.h`) |
 
 ---
 
