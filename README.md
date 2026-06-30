@@ -183,6 +183,34 @@ The first `update()` performs the initial entry cascade. There is no separate `i
 | `shallow` | Re-enter the last direct child that was active; then enter its initial child chain |
 | `deep` | Re-enter the exact leaf state that was last active in the subtree |
 
+### Serialization
+
+The machine's entire *mutable* state is the active leaf index plus the per-composite history
+table — small and pointer-free, so it snapshots trivially (e.g. for power-loss / warm-restart
+recovery). The engine doesn't impose a wire format: `save()` **hands you the data** and you
+persist it however you like (file, EEPROM, flash, network); `restore()` / `restore_cascade()`
+rebuild from values you read back.
+
+```cpp
+// save: your sink receives (currentState, history pointer, count)
+struct MySink {
+    void operator()(int current, const int* history, std::size_t count) { /* write however */ }
+};
+MySink sink;
+machine.save(sink);
+
+// restore: feed the values back. Range-checked; returns false and leaves the machine
+// untouched if anything is out of range or the count doesn't match.
+bool ok = machine.restore(current, history, count);          // position only, no callbacks
+bool ok = machine.restore_cascade(current, history, count);  // also replays on_enter, root -> leaf
+```
+
+What's captured: `currentState` + the history table. **Not** captured: the queued event.
+`restore` marks the machine initialized, so the next `update()` resumes normally without
+re-running the initial entry cascade.
+
+Frames are native-endian — intended for a device persisting and restoring its own state.
+
 ---
 
 ## Tooling — introspection & diagram export
@@ -368,6 +396,10 @@ no C++17 equivalent.
 | `Tcontroller::get_current_state()` | Returns the active leaf state's integer ID |
 | `Tcontroller::set_on_init(fn)` | Optional hook called once on the initial state before the first `update()` entry cascade; signature `void(int state)` |
 | `Tcontroller::set_on_transition(fn)` | Optional hook called on every fired transition; signature `void(int from, int to)` |
+| `Tcontroller::save(sink)` | Hands the snapshot to `sink(int current, const int* history, std::size_t count)`; you persist it |
+| `Tcontroller::restore(current, history, count)` | Restore position only (no callbacks); `false` if out of range / wrong count |
+| `Tcontroller::restore_cascade(current, history, count)` | Restore and replay `on_enter`, root → leaf; `false` if invalid |
+| `Tcontroller::layout_digest()` | `std::uint32_t` fingerprint of the structural tables, for your own integrity check |
 | `hfsm::annotations::get_names<States>()` | `constexpr std::array<const char*, Size>` of state type names, indexed by state ID (`tools/hfsm_annotations.h`) |
 | `HFSM_ACTION(name)` / `HFSM_GUARD(name)` | Annotate a transition's action/guard with a diagram label (`tools/hfsm_annotations.h`) |
 | `hfsm::diagram::to_plantuml<States, Transitions>([title])` | Generate a PlantUML state-diagram string (`tools/hfsm_generator.h`) |
