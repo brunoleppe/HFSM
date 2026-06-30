@@ -185,6 +185,76 @@ The first `update()` performs the initial entry cascade. There is no separate `i
 
 ---
 
+## Tooling — introspection & diagram export
+
+Optional, dev-time headers under `tools/`. They depend on the vendored `nameof` and
+`magic_enum` (`third_party/`); the core `hfsm.h` does not.
+
+### State-name table — `tools/hfsm_annotations.h`
+
+`hfsm::annotations::get_names<States>()` returns a `constexpr std::array<const char*, States::Size>`
+indexed by the same state ID passed to `on_init` / `on_transition`. Each entry is the state's type
+name (via `nameof`), a NUL-terminated string with static lifetime — usable directly in the plain
+function-pointer callbacks.
+
+```cpp
+#include "tools/hfsm_annotations.h"
+
+static constexpr auto names = hfsm::annotations::get_names<States>();
+void log(int from, int to) { std::printf("%s -> %s\n", names[from], names[to]); }
+
+machine.set_on_transition(log);
+```
+
+`get_names()` is `constexpr`, so `names` can be `constexpr` — required to reference it from the
+non-capturing function pointers the hooks expect.
+
+### Transition labels — `HFSM_ACTION` / `HFSM_GUARD`
+
+Place above the overridden method inside a transition struct; each expands to a sibling
+`static constexpr std::string_view` the generator reads via SFINAE. Optional and additive —
+unannotated transitions fall back to generic markers, and the core is never aware of them.
+
+```cpp
+struct AdvanceToRed : M::transition {
+    HFSM_ACTION("ActionToRed")
+    void on_action(int&) const override;
+    HFSM_GUARD("ToRedGuard")
+    bool on_guard(int&) const override;
+};
+```
+
+### PlantUML export — `tools/hfsm_generator.h`
+
+`hfsm::diagram::to_plantuml<States, Transitions>(title = {})` returns a `std::string`. It walks the
+compile-time hierarchy (`parentTable` / `initialStateTable`) to emit nested `state { … }` blocks, and
+the published `Transitions::metas` list for edges. State names come from `get_names`; event names from
+`magic_enum` (non-enum `EventType` falls back to the integer value).
+
+```cpp
+#include "tools/hfsm_generator.h"
+std::cout << hfsm::diagram::to_plantuml<States, Transitions>("Traffic Light");
+```
+
+Edge labels follow UML `event [guard] / action`, each segment emitted only when present. Guard/action
+presence is detected from whether the transition type overrides `on_guard` / `on_action` (via the
+declaring class of the member pointer); the bracketed/slash text is the `HFSM_GUARD` / `HFSM_ACTION`
+label when annotated, otherwise the generic `Guard` / `Action`.
+
+| Transition | Emitted label |
+|---|---|
+| no overrides | `Green --> Yellow : TICK` |
+| `on_guard`, unannotated | `… : TICK [Guard]` |
+| `on_guard` + `HFSM_GUARD("Ready")` | `… : TICK [Ready]` |
+| `on_action` + `HFSM_ACTION("Move")` | `… : TICK/Move` |
+| `AutomaticTransition` + guard | `A --> B : [Guard]` |
+| `InternalTransition` + action | `A : EVT/Action   (internal)` |
+
+History kinds render the target as a PlantUML history pseudostate: `To[H]` (shallow), `To[H*]` (deep).
+See `examples/traffic_light_annotated.cpp` for a complete annotated machine.
+
+---
+
 ## Reference Example — LoRa Radio Controller
 
 `tests/RadioControllerTests.cpp` is a realistic embedded reference: 16 states, 4 levels deep,
@@ -269,11 +339,7 @@ Dispatch goes through the vtable only. The library compiles and runs correctly w
 
 ### C++17 compatibility
 
-The library header requires C++17. Two C++20 constructs were removed to achieve this:
-- Bit-field default member initializer (`unsigned internal : 1 = 0`) replaced with an explicit
-  constructor.
-- `std::array::fill` in constexpr context replaced with a range-for loop.
-
+The library header requires C++17. 
 A `hfsm::span` polyfill is defined for compilers below C++20; in C++20+ it aliases `std::span`.
 The test suite stays at C++20 intentionally — it uses class-type NTTPs (`StrLiteral`) that have
 no C++17 equivalent.
@@ -302,6 +368,9 @@ no C++17 equivalent.
 | `Tcontroller::get_current_state()` | Returns the active leaf state's integer ID |
 | `Tcontroller::set_on_init(fn)` | Optional hook called once on the initial state before the first `update()` entry cascade; signature `void(int state)` |
 | `Tcontroller::set_on_transition(fn)` | Optional hook called on every fired transition; signature `void(int from, int to)` |
+| `hfsm::annotations::get_names<States>()` | `constexpr std::array<const char*, Size>` of state type names, indexed by state ID (`tools/hfsm_annotations.h`) |
+| `HFSM_ACTION(name)` / `HFSM_GUARD(name)` | Annotate a transition's action/guard with a diagram label (`tools/hfsm_annotations.h`) |
+| `hfsm::diagram::to_plantuml<States, Transitions>([title])` | Generate a PlantUML state-diagram string (`tools/hfsm_generator.h`) |
 
 ---
 
@@ -315,7 +384,9 @@ cmake --build build
 ctest --test-dir build
 ```
 
-Tests require C++20. The library itself requires only C++17.
+Tests require C++20. The library itself requires only C++17. The `tools/` headers additionally
+need the vendored `nameof` / `magic_enum`.
+
 
 ---
 
