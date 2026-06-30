@@ -939,6 +939,8 @@ namespace hfsm
                               "transition type must derive from Machine<Context>::transition");
                 static_assert(std::is_default_constructible_v<TransitionType>,
                               "transition type must be default-constructible");
+                static_assert(!std::is_same_v<From, To>,
+                              "AutomaticTransition<From, To, ...>: From == To is an infinite loop");
                 return auto_row::make(utils::resolve_index_v<From, Tags>, utils::resolve_index_v<To, Tags>,
                                       &utils::instancer<TransitionType>::value, Kind);
             }
@@ -947,7 +949,7 @@ namespace hfsm
         template <typename StateTable, typename TransitionTable>
         struct Tcontroller : controller<Context, EventType>
         {
-        private:
+        protected:
             // these must be static constexpr, not locals: the controller stores non-owning spans
             // over them, so they need storage that outlives the ctor or the spans dangle.
             static constexpr auto parentTable = StateTable::parentTable();
@@ -987,6 +989,7 @@ namespace hfsm
             }
         };
     };
+
 } // namespace hfsm
 
 #endif // HFSM_H
